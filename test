@@ -1,1 +1,705 @@
-test
+# ------------------------------------------------------------#
+# Template Version
+# ------------------------------------------------------------#
+AWSTemplateFormatVersion: 2010-09-09
+
+# ------------------------------------------------------------#
+# Description Section
+# ------------------------------------------------------------#
+Description:
+  Create PatchManager
+  
+# ------------------------------------------------------------#
+# Parameters Section
+# ------------------------------------------------------------#
+Parameters:
+  TemplateBucket:
+    Type: String
+
+# ------------------------------------------------------------#
+# Transform Section
+# ------------------------------------------------------------#
+Transform:
+  Name: 'AWS::Include'
+  Parameters:
+    Location: !Sub
+      - s3://${s3bucket}/vars/PatchManager_sample_vars.yml
+      - { s3bucket: !Ref TemplateBucket }
+
+Resources:
+# ------------------------------------------------------------#
+# SSMDocument for Patch
+# ------------------------------------------------------------#
+  AutoStartDocument:
+    Type: "AWS::SSM::Document"
+    Properties:
+      DocumentType: Automation
+      Name: !FindInMap
+        - PatchManager
+        - AutoStartDocument
+        - Name
+      Content:
+        description: !FindInMap
+          - PatchManager
+          - AutoStartDocument
+          - Description
+        schemaVersion: '0.3'
+        mainSteps:
+        - name: StartEC2Instances
+          action: aws:executeAwsApi
+          inputs:
+            Service: ssm
+            Api: StartAutomationExecution
+            DocumentName: AWS-StartEC2Instance
+            TargetParameterName: InstanceId
+            Targets:
+              - Key: 'tag:Patch Group'
+                Values:
+                  - !FindInMap [PatchManager,PatchBaseline,PatchGroups]
+  AutoStopDocument:
+    Type: "AWS::SSM::Document"
+    Properties:
+      DocumentType: Automation
+      Name: !FindInMap
+        - PatchManager
+        - AutoStopDocument
+        - Name
+      Content:
+        description: !FindInMap
+          - PatchManager
+          - AutoStopDocument
+          - Description
+        schemaVersion: '0.3'
+        mainSteps:
+        - name: StopEC2Instances
+          action: aws:executeAwsApi
+          inputs:
+            Service: ssm
+            Api: StartAutomationExecution
+            DocumentName: AWS-StopEC2Instance
+            TargetParameterName: InstanceId
+            Targets:
+              - Key: 'tag:Patch Group'
+                Values:
+                  - !FindInMap [PatchManager,PatchBaseline,PatchGroups]
+  SleepDocument:
+    Type: "AWS::SSM::Document"
+    Properties:
+      DocumentType: Automation
+      Name: !FindInMap
+        - PatchManager
+        - SleepDocument
+        - Name
+      Content:
+        description: !FindInMap
+          - PatchManager
+          - AutoStopDocument
+          - Description
+        schemaVersion: '0.3'
+        mainSteps:
+        - name: SleepAutomation
+          action: aws:sleep
+          inputs:
+            Duration: PT15M
+# ------------------------------------------------------------#
+# PatchBaseline
+# ------------------------------------------------------------#
+  PatchBaseline:
+    Type: AWS::SSM::PatchBaseline
+    Properties:
+      Name: !FindInMap
+        - PatchManager
+        - PatchBaseline
+        - Name
+      Description: !FindInMap
+        - PatchManager
+        - PatchBaseline
+        - Description
+      OperatingSystem: !FindInMap
+        - PatchManager
+        - PatchBaseline
+        - OperatingSystem
+      PatchGroups:
+        - !FindInMap [PatchManager,PatchBaseline,PatchGroups]
+      ApprovalRules:
+        PatchRules:
+          - ApproveAfterDays: !FindInMap
+            - PatchManager
+            - PatchBaseline
+            - ApproveAfterDays
+            PatchFilterGroup:
+              PatchFilters:
+                - Key: CLASSIFICATION
+                  Values:
+                    - Security
+                - Key: SEVERITY
+                  Values:
+                    - Important
+                    - Critical
+# ------------------------------------------------------------#
+# MaintenanceWindow
+# ------------------------------------------------------------#
+  MaintenanceWindow:
+    Type: AWS::SSM::MaintenanceWindow
+    Properties:
+      Name: !FindInMap
+        - PatchManager
+        - MaintenanceWindow
+        - Name
+      AllowUnassociatedTargets: !FindInMap
+        - PatchManager
+        - MaintenanceWindow
+        - AllowUnassociatedTargets
+      Cutoff: !FindInMap
+        - PatchManager
+        - MaintenanceWindow
+        - Cutoff
+      Duration: !FindInMap
+        - PatchManager
+        - MaintenanceWindow
+        - Duration
+      Schedule: !FindInMap
+        - PatchManager
+        - MaintenanceWindow
+        - Schedule
+# ------------------------------------------------------------#
+# ResourceGroups
+# ------------------------------------------------------------#
+  ResourceGroups:
+    Type: AWS::ResourceGroups::Group
+    Properties:
+      Name: !FindInMap
+        - PatchManager
+        - ResourceGroups
+        - Name
+      Description: !FindInMap
+        - PatchManager
+        - ResourceGroups
+        - Description
+      ResourceQuery:
+        Type:
+          "TAG_FILTERS_1_0" 
+        Query:
+          ResourceTypeFilters: 
+            - "AWS::AllSupported" 
+          TagFilters:
+            - 
+              Key: "Patch Group" 
+              Values: 
+                - !FindInMap [PatchManager,ResourceGroups,Values]
+# ------------------------------------------------------------#
+# MaintenanceWindowTarget
+# ------------------------------------------------------------#
+  MaintenanceWindowTarget:
+    Type: AWS::SSM::MaintenanceWindowTarget
+    Properties:
+      Name: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTarget
+        - Name
+      ResourceType: RESOURCE_GROUP
+      Targets:
+        - Key: "resource-groups:Name"
+          Values:
+            - !FindInMap [PatchManager,ResourceGroups,Name]
+      WindowId: !Ref MaintenanceWindow
+    DependsOn: MaintenanceWindow
+# ------------------------------------------------------------#
+# MaintenanceWindowTask
+# ------------------------------------------------------------#
+  MaintenanceWindowTask:
+    Type: AWS::SSM::MaintenanceWindowTask
+    Properties:
+      MaxConcurrency: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask
+        - MaxConcurrency 
+      MaxErrors: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask
+        - MaxErrors 
+      Name: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask
+        - Name
+      Priority: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask
+        - Priority 
+      Targets:
+        - Key: WindowTargetIds
+          Values:
+            - !Ref MaintenanceWindowTarget
+      TaskArn: !Ref AutoStartDocument
+      ServiceRoleArn: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask
+        - ServiceRoleArn     
+      TaskType: AUTOMATION
+      WindowId: !Ref MaintenanceWindow
+    DependsOn: MaintenanceWindowTarget
+# ------------------------------------------------------------#
+# MaintenanceWindowTask2
+# ------------------------------------------------------------#
+  MaintenanceWindowTask2:
+    Type: AWS::SSM::MaintenanceWindowTask
+    Properties:
+      MaxConcurrency: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask2
+        - MaxConcurrency 
+      MaxErrors: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask2
+        - MaxErrors 
+      Name: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask2
+        - Name
+      Priority: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask2
+        - Priority 
+      Targets:
+        - Key: WindowTargetIds
+          Values:
+            - !Ref MaintenanceWindowTarget
+      TaskArn: !Ref SleepDocument
+      ServiceRoleArn: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask2
+        - ServiceRoleArn     
+      TaskType: AUTOMATION
+      WindowId: !Ref MaintenanceWindow
+    DependsOn: MaintenanceWindowTarget
+# ------------------------------------------------------------#
+# MaintenanceWindowTask3
+# ------------------------------------------------------------#
+  MaintenanceWindowTask3:
+    Type: AWS::SSM::MaintenanceWindowTask
+    Properties:
+      MaxConcurrency: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask3
+        - MaxConcurrency 
+      MaxErrors: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask3
+        - MaxErrors 
+      Name: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask3
+        - Name
+      Priority: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask3
+        - Priority 
+      Targets:
+        - Key: WindowTargetIds
+          Values:
+            - !Ref MaintenanceWindowTarget
+      TaskArn: AWS-RunPatchBaseline
+      ServiceRoleArn: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask3
+        - ServiceRoleArn     
+      TaskType: RUN_COMMAND
+      WindowId: !Ref MaintenanceWindow
+      TaskInvocationParameters:
+        MaintenanceWindowRunCommandParameters:
+          TimeoutSeconds: !FindInMap
+            - PatchManager
+            - MaintenanceWindowTask3
+            - TimeoutSeconds
+          Parameters:
+            Operation:
+              - !FindInMap [PatchManager,MaintenanceWindowTask3,Operation]
+            RebootOption:
+              - !FindInMap [PatchManager,MaintenanceWindowTask3,RebootOption]
+    DependsOn: MaintenanceWindowTarget
+# ------------------------------------------------------------#
+# MaintenanceWindowTask4
+# ------------------------------------------------------------#
+  MaintenanceWindowTask4:
+    Type: AWS::SSM::MaintenanceWindowTask
+    Properties:
+      MaxConcurrency: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask4
+        - MaxConcurrency 
+      MaxErrors: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask4
+        - MaxErrors 
+      Name: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask4
+        - Name
+      Priority: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask4
+        - Priority 
+      Targets:
+        - Key: WindowTargetIds
+          Values:
+            - !Ref MaintenanceWindowTarget
+      TaskArn: !Ref SleepDocument
+      ServiceRoleArn: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask4
+        - ServiceRoleArn     
+      TaskType: AUTOMATION
+      WindowId: !Ref MaintenanceWindow
+    DependsOn: MaintenanceWindowTarget
+# ------------------------------------------------------------#
+# MaintenanceWindowTask5
+# ------------------------------------------------------------#
+  MaintenanceWindowTask5:
+    Type: AWS::SSM::MaintenanceWindowTask
+    Properties:
+      MaxConcurrency: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask5
+        - MaxConcurrency 
+      MaxErrors: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask5
+        - MaxErrors 
+      Name: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask5
+        - Name
+      Priority: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask5
+        - Priority 
+      Targets:
+        - Key: WindowTargetIds
+          Values:
+            - !Ref MaintenanceWindowTarget
+      TaskArn: !Ref AutoStopDocument
+      ServiceRoleArn: !FindInMap
+        - PatchManager
+        - MaintenanceWindowTask5
+        - ServiceRoleArn     
+      TaskType: AUTOMATION
+      WindowId: !Ref MaintenanceWindow
+    DependsOn: MaintenanceWindowTarget
+# ------------------------------------------------------------#
+# PatchManagerDetection
+# ------------------------------------------------------------#
+  PatchManagerDetection:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !FindInMap
+        - PatchManager
+        - PatchManagerDetection
+        - Name
+      Description: !FindInMap
+        - PatchManager
+        - PatchManagerDetection
+        - Description
+      EventPattern:
+        source:
+          - aws.ssm
+        detail-type:
+          - Maintenance Window Execution State-change Notification
+        detail:
+          state:
+             - "CANCELLED"
+             - "FAILED"
+             - "TIMED_OUT"
+      State: ENABLED
+      Targets:
+        - Arn: !FindInMap [PatchManager,PatchManagerDetection,Arn]
+          Id: !FindInMap
+            - PatchManager
+            - PatchManagerDetection
+            - Name
+            
+  －－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+  
+  # ------------------------------------------------------------#
+# Mappings Section
+# ------------------------------------------------------------#
+Mappings:
+  Backup:
+# ------------------------------------------------------------#
+# BackupVault
+# ------------------------------------------------------------#
+    BackupVault:
+      BackupVaultName: sample-backup-vault
+      EncryptionKeyArn: XXXXXXXXX
+# ------------------------------------------------------------#
+# BackupPlan
+# ------------------------------------------------------------#
+    BackupPlan:
+      BackupPlanName: sample-backup-plan
+      BackupRuleName: sample-backup-rule-daily
+      ScheduleExpression: "cron(0 18 ? * * *)"
+      DeleteAfterDays: 30
+      StartWindowMinutes: 60
+      CompletionWindowMinutes: 1080
+# ------------------------------------------------------------#
+# TagBasedBackup
+# ------------------------------------------------------------#
+    TagBasedBackup:
+      SelectionName: sample-assignment-name-backup
+      IamRoleArn: XXXXXXXXX
+      ConditionKey: "Backup"
+      ConditionValue: "On"
+# ------------------------------------------------------------#
+# AWSBackupFailureDetection
+# ------------------------------------------------------------#
+    AWSBackupFailureDetection:
+      Name: sample-event-rule-backup-failed
+      Description: "AWSBackupの失敗を検知"
+      Arn: 
+      
+      
+      -----------------------------------------
+      
+      # ------------------------------------------------------------#
+# Mappings Section
+# ------------------------------------------------------------#
+Mappings:
+  PatchManager:
+# ------------------------------------------------------------#
+#  SSMDocument
+# ------------------------------------------------------------#
+    AutoStartDocument:
+      Name: sample-ssmdoc-operation-autostart
+      Description: start-ec2-autostart-for-patch
+    AutoStopDocument:
+      Name: sample-ssmdoc-operation-autostop
+      Description: stop-ec2-autostop-for-patch
+    SleepDocument:
+      Name: sample-ssmdoc-operation-15min-sleep
+      Description: start-stop-during-sleep
+# ------------------------------------------------------------#
+#  PatchBaseline
+# ------------------------------------------------------------#
+    PatchBaseline:
+      Name: sample-patchbaseline
+      Description: sample-patchbaseline-for-amazon-linux
+      OperatingSystem: AMAZON_LINUX_2
+      PatchGroups: sample-patchgroup
+      ApproveAfterDays: 7
+# ------------------------------------------------------------#
+# MaintenanceWindow
+# ------------------------------------------------------------#
+    MaintenanceWindow:
+      Name: sample-mentenancewindow
+      AllowUnassociatedTargets: true
+      Cutoff: 0
+      Duration: 2
+      Schedule: "cron(30 18 ? * SUN#1 *)"
+# ------------------------------------------------------------#
+# ResourceGroups
+# ------------------------------------------------------------#
+    ResourceGroups:
+      Name: sample-resourcegroups
+      Values: sample-patchgroup
+# ------------------------------------------------------------#
+# MaintenanceWindowTarget
+# ------------------------------------------------------------#
+    MaintenanceWindowTarget:
+      Name: PatchingTarget
+# ------------------------------------------------------------#
+# MaintenanceWindowTask
+# ------------------------------------------------------------#
+    MaintenanceWindowTask:
+      Name: Start-EC2
+      MaxConcurrency: 50
+      MaxErrors: 1
+      Priority: 0
+      ServiceRoleArn: XXXXXXX
+
+    MaintenanceWindowTask2:
+      Name: Wait-Start-EC2
+      MaxConcurrency: 50
+      MaxErrors: 1
+      Priority: 1
+      ServiceRoleArn: XXXXXXX
+
+    MaintenanceWindowTask3:
+      Name: PatchingTask
+      MaxConcurrency: 50
+      MaxErrors: 1
+      Priority: 2
+      ServiceRoleArn: XXXXXXX
+      TimeoutSeconds: 600
+      Operation: Install
+      RebootOption: NoReboot
+  
+    MaintenanceWindowTask4:
+      Name: Wait-Stop-EC2
+      MaxConcurrency: 50
+      MaxErrors: 1
+      Priority: 3
+      ServiceRoleArn: XXXXXXX
+
+    MaintenanceWindowTask5:
+      Name: Stop-EC2
+      MaxConcurrency: 50
+      MaxErrors: 1
+      Priority: 4
+      ServiceRoleArn: XXXXXXX      
+# ------------------------------------------------------------#
+# PatchManagerDetection
+# ------------------------------------------------------------#
+    PatchManagerDetection:
+      Name: sample-event-rule-patch-failed
+      Arn: XXXXXXXXXXXXXXXXXXXXXXX
+      Description: "パッチ適用の失敗を検知"
+      
+      
+      ----------------------------
+      
+# ------------------------------------------------------------#
+# Template Version
+# ------------------------------------------------------------#
+AWSTemplateFormatVersion: 2010-09-09
+
+# ------------------------------------------------------------#
+# Description Section
+# ------------------------------------------------------------#
+Description: 
+  Create AWSBackup
+
+# ------------------------------------------------------------#
+# Parameters Section
+# ------------------------------------------------------------#
+Parameters:
+  TemplateBucket:
+    Type: String
+
+# ------------------------------------------------------------#
+# Transform Section
+# ------------------------------------------------------------#
+Transform:
+  Name: 'AWS::Include'
+  Parameters:
+    Location: !Sub
+      - s3://${s3bucket}/vars/AWSBackup_sample_vars.yml
+      - { s3bucket: !Ref TemplateBucket }
+
+Resources:      
+# ------------------------------------------------------------#
+# BackupVaultWithBackups
+# ------------------------------------------------------------#
+  BackupVaultWithBackups:
+    Type: AWS::Backup::BackupVault
+    Properties:
+      BackupVaultName: !FindInMap
+        - Backup
+        - BackupVault
+        - BackupVaultName
+      EncryptionKeyArn: !FindInMap
+        - Backup
+        - BackupVault
+        - EncryptionKeyArn
+
+# ------------------------------------------------------------#
+# BackupPlanWithDailyBackup
+# ------------------------------------------------------------#
+  BackupPlanWithDailyBackups:
+    Type: "AWS::Backup::BackupPlan"
+    DeletionPolicy: Delete
+    Properties:
+      BackupPlan:
+        BackupPlanName: !FindInMap
+        - Backup
+        - BackupPlan
+        - BackupPlanName
+        BackupPlanRule:
+          -
+            RuleName: !FindInMap
+            - Backup
+            - BackupPlan
+            - BackupRuleName
+            TargetBackupVault: !Ref BackupVaultWithBackups
+            ScheduleExpression: !FindInMap
+            - Backup
+            - BackupPlan
+            - ScheduleExpression     
+            Lifecycle:
+              DeleteAfterDays: !FindInMap
+                - Backup
+                - BackupPlan
+                - DeleteAfterDays
+            StartWindowMinutes: !FindInMap
+                - Backup
+                - BackupPlan
+                - StartWindowMinutes
+            CompletionWindowMinutes: !FindInMap
+                - Backup
+                - BackupPlan
+                - CompletionWindowMinutes
+    DependsOn: BackupVaultWithBackups
+
+# ------------------------------------------------------------#
+# TagBasedBackup
+# ------------------------------------------------------------#
+  TagBasedBackup:
+    Type: "AWS::Backup::BackupSelection"
+    Properties:
+      BackupSelection:
+        SelectionName: !FindInMap
+          - Backup
+          - TagBasedBackup
+          - SelectionName
+        IamRoleArn: !FindInMap
+          - Backup
+          - TagBasedBackup
+          - IamRoleArn
+        ListOfTags:
+         -
+           ConditionType: "STRINGEQUALS"
+           ConditionKey: !FindInMap 
+             - Backup
+             - TagBasedBackup
+             - ConditionKey
+           ConditionValue: !FindInMap 
+             - Backup
+             - TagBasedBackup
+             - ConditionValue
+      BackupPlanId: !Ref BackupPlanWithDailyBackups
+    DependsOn: BackupPlanWithDailyBackups
+# ------------------------------------------------------------#
+# AWSBackupFailureDetection
+# ------------------------------------------------------------#
+  AWSBackupFailureDetection:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !FindInMap
+        - Backup
+        - AWSBackupFailureDetection
+        - Name
+      Description: !FindInMap
+        - Backup
+        - AWSBackupFailureDetection
+        - Description
+      EventPattern:
+        source:
+          - aws.backup
+        detail-type:
+          - Backup Job State Change
+        detail:
+          state:
+             - "ABORTED"
+             - "FAILED"
+             - "EXPIRED"
+      State: ENABLED
+      Targets:
+        - Arn: !FindInMap [Backup,AWSBackupFailureDetection,Arn]
+          Id: !FindInMap
+            - Backup
+            - AWSBackupFailureDetection
+            - Name
+      
+      
+      
+      
+  
+  
